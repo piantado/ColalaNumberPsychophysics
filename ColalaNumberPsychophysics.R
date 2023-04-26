@@ -12,7 +12,7 @@
 
 library(Rcpp)
 
-sourceCpp("R-Test.cpp")
+sourceCpp("Implementation.cpp")
 
 WEBER_RATE <- 1.0 # rate on the prior for Weber
 

@@ -1,4 +1,4 @@
-source("NumberPsychophysics.R")
+source("ColalaNumberPsychophysics.R")
 
 ## Simulate and test recovery for estimation
 D <- NULL
