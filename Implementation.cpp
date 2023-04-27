@@ -174,13 +174,56 @@ struct QDistribution {
 	
 };
 
+
+// [[Rcpp::export]] 
+Rcpp::NumericVector cheyette_mean(const Rcpp::NumericVector& n, const double ib) {
+	// analytically compute the mean 
+
+	Rcpp::NumericVector out; 
+	for(size_t i=0;i<n.size();i++) {
+		
+		QDistribution q(n.at(i),ib);
+		
+		double s = 0.0;
+		for(size_t k=1;k<N;k++) {
+			s += exp(q.lp(k))*k;
+		}
+		out.push_back(s);
+	}
+	return out;
+}
+
+// [[Rcpp::export]] 
+Rcpp::NumericVector cheyette_sd(const Rcpp::NumericVector& n, const double ib) {
+	// analytically compute the SD of responses
+
+	auto m = cheyette_mean(n,ib);
+	
+	Rcpp::NumericVector out; 
+	for(size_t i=0;i<n.size();i++) {
+		
+		QDistribution q(n.at(i),ib);
+		
+		double s = 0.0;
+		for(size_t k=1;k<N;k++) {
+			s += exp(q.lp(k))*pow(k-m.at(i),2);
+		}
+		out.push_back(sqrt(s));
+	}
+	return out;
+}
+
+
+
 // [[Rcpp::export]] 
 double discrimination_likelihood(const Rcpp::NumericVector& n1, 
 								 const Rcpp::NumericVector& n2, 
-								 const Rcpp::NumericVector& accuracy, 
+								 const Rcpp::NumericVector& ntrials, 
+								 const Rcpp::NumericVector& ncorrect,
 								 const double ib) {
 	assert(n1.size() == n2.size());
-	assert(n1.size() == accuracy.size());
+	assert(n1.size() == ntrials.size());
+	assert(n1.size() == ncorrect.size());
 	
 	// TODO: Cache lambda_n
 	double ll = 0.0;
@@ -212,12 +255,10 @@ double discrimination_likelihood(const Rcpp::NumericVector& n1,
 			r2cdf = logplusexp(r2cdf, q2.lp(r));
 		}
 		
-		if(accuracy.at(i) == (n1.at(i) > n2.at(i))) {
-			ll += lpn1gtn2;
-		}
-		else {
-			ll += log1p(-exp(lpn1gtn2)); //log(1-exp(lp));
-		}
+		double lpcorrect   = (n1.at(i) > n2.at(i) ? lpn1gtn2 : log1p(-exp(lpn1gtn2)));
+		double lpincorrect = (n1.at(i) > n2.at(i) ? log1p(-exp(lpn1gtn2)) : lpn1gtn2);
+		
+		ll += lpcorrect * ncorrect.at(i) + lpincorrect*(ntrials.at(i)-ncorrect.at(i));
 		//std::cout << ib <<"\t"<< lpn1gtn2 <<"\t"<< accuracy.at(i) <<"\t"<< ll << std::endl;
 	}
 // 	std::cout << ib <<"\t"<< ll <<"\t"<< n1.size() << std::endl;
@@ -329,7 +370,8 @@ double estimation_fit_ib_bound(const Rcpp::NumericVector& shown,
 // [[Rcpp::export]]
 double discrimination_fit_ib_bound(const Rcpp::NumericVector& n1, 
 								   const Rcpp::NumericVector& n2,
-								   const Rcpp::NumericVector& accuracy) {
+								   const Rcpp::NumericVector& ntrials,
+								   const Rcpp::NumericVector& ncorrect) {
 	// Implement a golden-section search here to fit. 
 	// this searches in [a,b] with interior points a < x < y < b
 	// https://en.wikipedia.org/wiki/Golden-section_search
@@ -339,17 +381,25 @@ double discrimination_fit_ib_bound(const Rcpp::NumericVector& n1,
 	auto a  = MIN_IB;  
 	auto b  = MAX_IB; 
 	
+	// count up to see if we are doing really terrible in the likelihood
+	double total_trials = std::accumulate(ntrials.begin(), ntrials.end(),0);
+	
 	while(b-a > tolerance){
 		assert(b > a);
 		
 		const auto x = b - phi_inv*(b-a);
 		const auto y = a + phi_inv*(b-a);
 		assert(x < y);
-		auto fx = discrimination_likelihood(n1,n2,accuracy,x);
-		auto fy = discrimination_likelihood(n1,n2,accuracy,y);
+		auto fx = discrimination_likelihood(n1,n2,ntrials,ncorrect,x);
+		auto fy = discrimination_likelihood(n1,n2,ntrials,ncorrect,y);
 		//std::cout << a << "\t" << b <<"\t"<< fx <<"\t"<< fy << std::endl;
 		
-		if(fy <= -infinity or std::isnan(fy)) {
+		if( std::max(fx,fy)/std::min(fx,fy) < 1.01 and fy < total_trials*(-10) ) { 
+			// first a special case here -- if fx \approx fy and the estimation_likelihood is low,
+			// then we probably have an ib that is too high, so treat this as b is bad
+			b = y;
+		}
+		else if(fy <= -infinity or std::isnan(fy)) {
 			b = y;
 		}
 		else if(fx <= -infinity or std::isnan(fx)) {

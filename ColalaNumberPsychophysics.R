@@ -58,10 +58,10 @@ estimation.fit <- function(shown, response, model="weber") {
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 estimation.full.fit <- function(shown, response, model="weber", plot=TRUE) {
 
-	mode <- estimation.fit(shown, response, model=model)$param
+	best <- estimation.fit(shown, response, model=model)$param
 	
 	# now evaluate at a bunch of places to compute the fit 
-	parms <- seq(0, 3*mode, length.out=100) 
+	parms <- seq(0, 3*best, length.out=100) 
 	lls <- sapply(parms, function(ib){ estimation.likelihood(shown,response,ib, model=model)})
 	z <- logsumexp(lls)
 	lls.m <- exp(lls - z) # and normalize
@@ -76,18 +76,18 @@ estimation.full.fit <- function(shown, response, model="weber", plot=TRUE) {
 	# which may not be ideal but works pretty well. 
 	# we will start with the mean on the right value 
 	params <- optimize(interval=c(0,5),  function(x) { 
-		sum((lls.m - exp(lg(parms, mode, x)))^2)
+		sum((lls.m - exp(lg(parms, best, x)))^2)
 	})
 		
 	fitsd <- params$minimum 
 		
 	if(plot) {
 		plot(parms, lls.m, type="l")
-		lines(parms, exp(lg(parms, mode, fitsd)), col=2  )
-		points(mode, 0, col=3)
+		lines(parms, exp(lg(parms, best, fitsd)), col=2  )
+		points(best, 0, col=3)
 	}
 	
-	list(param=mode, sd=fitsd, ll=estimation.likelihood(response, shown, mode, model=model), model=model )
+	list(param=best, sd=fitsd, ll=estimation.likelihood(shown, response, best, model=model), model=model )
 }
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -110,14 +110,15 @@ estimation.sample <- function(shown, param, model="weber") {
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 # =========================================================
-discrimination.likelihood <- function(n1, n2, accuracy, param, model="weber") {
+discrimination.likelihood <- function(n1, n2, ntrials, ncorrect, param, model="weber") {
 	if(model=="weber") {
 		stopifnot(param > 0); stopifnot(length(param)==1)
 		pcorrect <- 1.0-pnorm(0, abs(n1-n2), param * sqrt(n1^2+n2^2), log=F)
-		sum(ifelse(accuracy,log(pcorrect),log(1.0-pcorrect)))
+		pcorrect <- 0.00005 + pcorrect*0.9999 # add a tiny bit of smoothing here so that we don't get NaNs
+		sum( ncorrect*log(pcorrect) + (ntrials-ncorrect)*log(1.0-pcorrect))
 	}
 	else if(model == "cheyette") {
-		discrimination_likelihood(n1,n2,accuracy,param)
+		discrimination_likelihood(n1,n2,ntrials,ncorrect,param)
 	}
 	else {
 		print("Invalid model", model)
@@ -125,19 +126,19 @@ discrimination.likelihood <- function(n1, n2, accuracy, param, model="weber") {
 }
 
 # =========================================================
-discrimination.fit <- function(n1, n2, accuracy, model="weber") {
+discrimination.fit <- function(n1, n2, ntrials, ncorrect, model="weber") {
 	if(model=="weber") {
 		best <- optimize(interval=c(0.001,5.0),  
 			function(w) { 
-				-discrimination.likelihood(n1,n2,accuracy,w,model=model) - dexp(w, WEBER_RATE, log=T) 
+				-discrimination.likelihood(n1,n2,ntrials,ncorrect,w,model=model) - dexp(w, WEBER_RATE, log=T) 
 		})	
 	
 		# recompute the likelihood only (score w/o prior)
-		list(param=best$minimum, ll=discrimination.likelihood(n1,n2,accuracy,best$minimum), model=model)
+		list(param=best$minimum, ll=discrimination.likelihood(n1,n2,ntrials,ncorrect,best$minimum), model=model)
 	}
 	else if(model == "cheyette") {
-		ib <- discrimination_fit_ib_bound(n1,n2,accuracy)
-		list(param=ib, ll=discrimination.likelihood(n1,n2,accuracy,ib,model=model), model=model)	
+		ib <- discrimination_fit_ib_bound(n1,n2,ntrials,ncorrect)
+		list(param=ib, ll=discrimination.likelihood(n1,n2,ntrials,ncorrect,ib,model=model), model=model)	
 	}
 	else {
 		print("Invalid model", model)
@@ -145,13 +146,13 @@ discrimination.fit <- function(n1, n2, accuracy, model="weber") {
 }
 
 # =========================================================
-discrimination.full.fit <- function(n1, n2, accuracy, model="weber", plot=TRUE){
+discrimination.full.fit <- function(n1, n2, ntrials, ncorrect, model="weber", plot=TRUE){
 
-	mode <- discrimination.fit(n1, n2, accuracy, model=model)$param
+	best <- discrimination.fit(n1, n2, ntrials, ncorrect, model=model)$param
 	
 	# now evaluate at a bunch of places to compute the fit 
-	parms <- seq(1e-3, 3*mode, length.out=100) 
-	lls <- sapply(parms, function(x){ discrimination.likelihood(n1, n2, accuracy, x, model=model)})
+	parms <- seq(1e-3, 3*best, length.out=100) 
+	lls <- sapply(parms, function(x){ discrimination.likelihood(n1, n2, ntrials, ncorrect, x, model=model)})
 	z <- logsumexp(lls)
 	lls.m <- exp(lls - z) # and normalize
 	
@@ -165,18 +166,18 @@ discrimination.full.fit <- function(n1, n2, accuracy, model="weber", plot=TRUE){
 	# which may not be ideal but works pretty well. 
 	# we will start with the mean on the right value 
 	params <- optimize(interval=c(0,5),  function(x) { 
-		sum((lls.m - exp(lg(parms, mode, x)))^2)
+		sum((lls.m - exp(lg(parms, best, x)))^2)
 	})
 		
 	fitsd <- params$minimum 
 		
 	if(plot) {
 		plot(parms, lls.m, type="l")
-		lines(parms, exp(lg(parms, mode, fitsd)), col=2  )
-		points(mode, 0, col=3)
+		lines(parms, exp(lg(parms, best, fitsd)), col=2  )
+		points(best, 0, col=3)
 	}
 	
-	list(param=mode, sd=fitsd, ll=discrimination.likelihood(n1, n2, accuracy, mode, model=model), model=model )
+	list(param=best, sd=fitsd, ll=discrimination.likelihood(n1, n2, ntrials, ncorrect, best, model=model), model=model )
 
 }
 
